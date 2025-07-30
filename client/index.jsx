@@ -103,12 +103,10 @@ class PostMessageAttachmentComponent extends React.Component {
     isRendered() {
         const parent = this.msg.parentElement;
         this.customId = this.postId + `_custom_${this.fileType}_video_container`;
-        if (parent.children[1] != null) {
-            if (parent.children[1].id == this.customId) {
-                return true;
-            }
+        if (parent == null) {
+            return false;
         }
-        return false;
+        return parent.querySelector(`#${this.customId}`) != null;
     }
 
     /**

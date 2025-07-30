@@ -103,11 +103,32 @@ class PostMessageAttachmentComponent extends React.Component {
     isRendered() {
         const parent = this.msg.parentElement;
         this.customId = this.postId + `_custom_${this.fileType}_video_container`;
-        if (parent.children[1] != null) {
-            if (parent.children[1].id == this.customId) {
+        
+        // Check if video player already exists anywhere in the parent element
+        const existingPlayer = parent.querySelector(`#${this.customId}`);
+        if (existingPlayer) {
+            return true;
+        }
+        
+        // Check for existing video players with the same post ID
+        const existingPostPlayers = parent.querySelectorAll(`[data-videofile-post-id="${this.postId}"]`);
+        if (existingPostPlayers.length > 0) {
+            return true;
+        }
+        
+        // Also check if any video element with the same source already exists
+        const videoElements = parent.querySelectorAll('video');
+        for (const video of videoElements) {
+            const source = video.querySelector('source');
+            if (source && source.src === this.fileUrl) {
+                return true;
+            }
+            // Check data attribute as well
+            if (video.getAttribute('data-videofile-source') === this.fileUrl) {
                 return true;
             }
         }
+        
         return false;
     }
 
@@ -136,13 +157,15 @@ class PostMessageAttachmentComponent extends React.Component {
                     }`;
         const node = document.createElement('div');
         node.setAttribute('id', this.customId);
+        node.setAttribute('data-videofile-post-id', this.postId);
+        node.setAttribute('data-videofile-url', this.fileUrl);
 
         const fileType = this.getVideoUrlType(this.fileUrl);
 
         const html =
             <>
                 <style>{css}</style>
-                <video controls="true" class="videofile-mh">
+                <video controls="true" class="videofile-mh" data-videofile-source={this.fileUrl}>
                     <source src={this.fileUrl} type={fileType} />
                 </video>
             </>;
@@ -203,13 +226,17 @@ class PostMessageAttachmentComponent extends React.Component {
                     return;
                 }
             }
+            
+            // Get file URL early so we can use it in isRendered check
+            this.fileUrl = this.getFileUrl();
+            
             if (this.isRendered()) {
                 return;
             }
-            this.fileUrl = this.getFileUrl();
+            
             this.msg.parentElement.append(this.getHtmlVideoElement());
         } catch (err) {
-            console.log('err', err);
+            console.log('VideoFile plugin error:', err);
         }
     }
 

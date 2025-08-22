@@ -65,6 +65,9 @@ class PostMessageAttachmentComponent extends React.Component {
         this.fileType = null;
         this.fileUrl = null;
         this.customId = null;
+        this.rootRef = React.createRef();
+        this._didInject = false;
+        this._timer = null;
         this.postMessageId = this.postId + '_message';
         /**
          * @type {PluginSettings}
@@ -73,10 +76,33 @@ class PostMessageAttachmentComponent extends React.Component {
     }
 
     render() {
-        setTimeout(() => {
+        // Render a lightweight, layout-neutral root so we can scope DOM queries to the correct pane (center/RHS).
+        return (<div ref={this.rootRef} data-videofile-root="true" style={{display: 'contents'}} />);
+    }
+
+    componentDidMount() {
+        this._scheduleAfterRender();
+    }
+
+    componentDidUpdate() {
+        this._scheduleAfterRender();
+    }
+
+    componentWillUnmount() {
+        if (this._timer) {
+            clearTimeout(this._timer);
+            this._timer = null;
+        }
+    }
+
+    _scheduleAfterRender() {
+        if (this._timer) {
+            clearTimeout(this._timer);
+        }
+        this._timer = setTimeout(() => {
             this.afterRender();
+            this._timer = null;
         }, this.settings.renderTimeout);
-        return (null);
     }
 
     /**
@@ -102,7 +128,17 @@ class PostMessageAttachmentComponent extends React.Component {
      */
     isRendered() {
         const parent = this.msg.parentElement;
-        this.customId = this.postId + `_custom_${this.fileType}_video_container`;
+        // Ensure a stable id per attachment by using the file URL when available.
+        if (!this.customId && this.fileUrl) {
+            // Use a simple hash substitute by base64 of the URL to keep ids DOM-safe.
+            try {
+                this.customId = `${this.postId}_custom_${btoa(unescape(encodeURIComponent(this.fileUrl))).replace(/[^a-zA-Z0-9_-]/g, '')}_video_container`;
+            } catch {
+                this.customId = this.postId + `_custom_${this.fileType}_video_container`;
+            }
+        } else if (!this.customId) {
+            this.customId = this.postId + `_custom_${this.fileType}_video_container`;
+        }
         
         // Check if video player already exists anywhere in the parent element
         const existingPlayer = parent.querySelector(`#${this.customId}`);
@@ -130,6 +166,23 @@ class PostMessageAttachmentComponent extends React.Component {
         }
         
         return false;
+    }
+
+    /**
+     * Remove duplicate players with the same URL within the same parent container, keeping the first.
+     * @param {HTMLElement} parent
+     */
+    cleanupDuplicates(parent) {
+        try {
+            const nodes = parent.querySelectorAll(`[data-videofile-post-id="${this.postId}"][data-videofile-url="${this.fileUrl}"]`);
+            if (nodes.length <= 1) {
+                return;
+            }
+            // Keep the first, remove the rest
+            for (let i = 1; i < nodes.length; i++) {
+                nodes[i].remove();
+            }
+        } catch {}
     }
 
     /**
@@ -183,7 +236,7 @@ class PostMessageAttachmentComponent extends React.Component {
             const split = url.split('.');
             switch (split[split.length - 1]) {
                 case 'webm':
-                    return 'video/mp4';
+                    return 'video/webm';
 
                 case 'mov':
                     return 'video/quicktime';
@@ -212,9 +265,24 @@ class PostMessageAttachmentComponent extends React.Component {
         /**
          * @type HTMLDivElement
          */
-        this.msg = document.getElementById(this.postMessageId);
+        // Prefer scoping to the nearest matching node within this component's subtree (fixes duplication between panes).
+        try {
+            const root = this.rootRef && this.rootRef.current ? this.rootRef.current : null;
+            if (root) {
+                // Find the closest message body for this post inside the same pane (center/RHS)
+                this.msg = root.closest(`#${this.postMessageId}`) || null;
+            }
+        } catch {}
+        // Fallback for older layouts if not found within scope
+        if (!this.msg) {
+            this.msg = document.getElementById(this.postMessageId);
+        }
         try {
             if (!this.isFilePostMessage()) {
+                return;
+            }
+            // Prevent double injection from the same component instance.
+            if (this._didInject) {
                 return;
             }
             this.fileType = this.getFileType();
@@ -231,10 +299,13 @@ class PostMessageAttachmentComponent extends React.Component {
             this.fileUrl = this.getFileUrl();
             
             if (this.isRendered()) {
+                // If rendered, ensure there's only one instance
+                this.cleanupDuplicates(this.msg.parentElement);
                 return;
             }
             
             this.msg.parentElement.append(this.getHtmlVideoElement());
+            this._didInject = true;
         } catch (err) {
             console.log('VideoFile plugin error:', err);
         }
